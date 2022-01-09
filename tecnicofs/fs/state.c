@@ -111,7 +111,11 @@ int inode_create(inode_type n_type) {
                 }
 
                 inode_table[inumber].i_size = BLOCK_SIZE;
-                inode_table[inumber].i_data_block = b;
+                for(int i = 1; i < DATA_BLOCK_COUNT; i++) 
+                {
+                    inode_table[inumber].i_data_block[i] = -1;
+                }
+                inode_table[inumber].i_data_block[0] = b;
 
                 dir_entry_t *dir_entry = (dir_entry_t *)data_block_get(b);
                 if (dir_entry == NULL) {
@@ -125,7 +129,10 @@ int inode_create(inode_type n_type) {
             } else {
                 /* In case of a new file, simply sets its size to 0 */
                 inode_table[inumber].i_size = 0;
-                inode_table[inumber].i_data_block = -1;
+                for(int i = 0; i < DATA_BLOCK_COUNT; i++) 
+                {
+                    inode_table[inumber].i_data_block[i] = -1;
+                }
             }
             return inumber;
         }
@@ -143,23 +150,32 @@ int inode_delete(int inumber) {
     // simulate storage access delay (to i-node and freeinode_ts)
     insert_delay();
     insert_delay();
-
+    int return_code = 0;
     if (!valid_inumber(inumber) || freeinode_ts[inumber] == FREE) {
         return -1;
     }
 
     freeinode_ts[inumber] = FREE;
 
-    if (inode_table[inumber].i_size > 0) {
-        if (data_block_free(inode_table[inumber].i_data_block) == -1) {
-            return -1;
+    if (inode_table[inumber].i_size > 0) 
+    {
+        for(int i = 0; i < DATA_BLOCK_COUNT; i++) 
+        {
+            if(inode_table[inumber].i_data_block[i] != -1) 
+            {
+                if (data_block_free(inode_table[inumber].i_data_block[i]) == -1) 
+                {
+                    //frees all block regardless of errors
+                    return_code = -1;
+                }
+            }
         }
     }
 
     /* TODO: handle non-empty directories (either return error, or recursively
      * delete children */
 
-    return 0;
+    return return_code;
 }
 
 /*
@@ -201,7 +217,7 @@ int add_dir_entry(int inumber, int sub_inumber, char const *sub_name) {
 
     /* Locates the block containing the directory's entries */
     dir_entry_t *dir_entry =
-        (dir_entry_t *)data_block_get(inode_table[inumber].i_data_block);
+        (dir_entry_t *)data_block_get(inode_table[inumber].i_data_block[0]);
     if (dir_entry == NULL) {
         return -1;
     }
@@ -234,7 +250,7 @@ int find_in_dir(int inumber, char const *sub_name) {
 
     /* Locates the block containing the directory's entries */
     dir_entry_t *dir_entry =
-        (dir_entry_t *)data_block_get(inode_table[inumber].i_data_block);
+        (dir_entry_t *)data_block_get(inode_table[inumber].i_data_block[0]);
     if (dir_entry == NULL) {
         return -1;
     }

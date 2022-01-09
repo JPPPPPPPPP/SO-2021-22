@@ -3,6 +3,7 @@
 #include <string.h>
 
 int main() {
+    //setvbuf(stdout, NULL, _IONBF, 0);
 
     char *str = "AAA!";
     char *path = "/f1";
