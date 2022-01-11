@@ -3,11 +3,10 @@
 #include <string.h>
 
 int main() {
-    //setvbuf(stdout, NULL, _IONBF, 0);
 
-    char *str = "soemthing!";
+    char *str = "AAA!";
     char *path = "/f1";
-    char buffer[1538];
+    char buffer[40];
 
     assert(tfs_init() != -1);
 
@@ -30,8 +29,6 @@ int main() {
 
     buffer[r] = '\0';
     assert(strcmp(buffer, str) == 0);
-
-    assert(tfs_copy_to_external_fs(path, "./nut") != -1);
 
     assert(tfs_close(f) != -1);
 

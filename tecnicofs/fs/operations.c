@@ -200,7 +200,7 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
     if (to_read > 0) {
         size_t final_size = file->of_offset + to_read;
         size_t read = 0;
-        for(size_t block_idx = inode->i_size/BLOCK_SIZE; block_idx <= final_size/BLOCK_SIZE; block_idx++) 
+        for(size_t block_idx = 0; block_idx <= final_size/BLOCK_SIZE; block_idx++) 
         {
         	void *block = data_block_get(inode->i_data_block[block_idx]);
 	        if (block == NULL) 
@@ -208,6 +208,7 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
 	            return -1;
 	        }
 
+            //finds the offset in the block rather than file
 			size_t block_offset = file->of_offset % BLOCK_SIZE;
 	        
             //makes sure the block is only partially read from
@@ -228,4 +229,57 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
     }
 
     return (ssize_t)to_read;
+}
+
+
+int tfs_copy_to_external_fs(char const *source_path, char const *dest_path) 
+{
+    if(tfs_lookup(source_path) == -1) 
+    {
+        return -1;
+    }
+
+    int tfs_d = tfs_open(source_path, TFS_O_CREAT);
+    if(tfs_d == -1) 
+    {
+        return -1;
+    }
+
+    open_file_entry_t *file = get_open_file_entry(tfs_d);
+    if (file == NULL) {
+        return -1;
+    }
+
+    //gets inode
+    inode_t *inode = inode_get(file->of_inumber);
+    if(inode == NULL) 
+    {
+        return -1;
+    }
+
+    size_t len = inode->i_size;
+    char* contents = (char*)malloc(sizeof(char)*(len+1));
+    tfs_read(tfs_d, contents, len);
+    contents[len] = '\0';
+
+
+    FILE *fd = fopen(dest_path, "wb");
+    if(fd == NULL) 
+    {
+        fclose(fd);
+        free(contents);
+        return -1;
+    }
+    
+    if(fwrite(contents, 1, len, fd) != len) 
+    {
+        fclose(fd);
+        free(contents);
+        return -1;
+    }
+
+    
+    fclose(fd);
+    free(contents);
+    return 0;
 }
