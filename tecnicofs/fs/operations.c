@@ -187,7 +187,7 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
     if (to_read > 0) {
         size_t final_size = file->of_offset + to_read;
         size_t read = 0;
-        for(size_t block_idx = 0; block_idx <= final_size/BLOCK_SIZE; block_idx++) 
+        for(size_t block_idx = file->of_offset / BLOCK_SIZE; block_idx <= final_size/BLOCK_SIZE; block_idx++) 
         {
             //finds the offset in the block rather than file
 			size_t block_offset = file->of_offset % BLOCK_SIZE;
@@ -232,12 +232,7 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
 
 int tfs_copy_to_external_fs(char const *source_path, char const *dest_path) 
 {
-    if(tfs_lookup(source_path) == -1) 
-    {
-        return -1;
-    }
-
-    int tfs_d = tfs_open(source_path, TFS_O_CREAT);
+    int tfs_d = tfs_open(source_path, 0);
     if(tfs_d == -1) 
     {
         return -1;
