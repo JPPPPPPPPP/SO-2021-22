@@ -25,7 +25,6 @@ static bool valid_pathname(char const *name) {
     return name != NULL && strlen(name) > 1 && name[0] == '/';
 }
 
-
 int tfs_lookup(char const *name) {
     if (!valid_pathname(name)) {
         return -1;
@@ -58,23 +57,10 @@ int tfs_open(char const *name, int flags) {
         if (flags & TFS_O_TRUNC) {
             if (inode->i_size > 0) 
             {
-                int return_code = 0;
-                for(int i = 0; i < DATA_BLOCK_COUNT; i++) 
-		        {
-		            if(inode->i_data_block[i] != -1) 
-		            {
-		                if (data_block_free(inode->i_data_block[i]) == -1) 
-		                {
-		                    //frees all block regardless of errors
-		                    return_code = -1;
-		                }
-		            }
-		        }
-		        if(return_code != 0) 
-		        {
-		        	return return_code;
-		        }
-                inode->i_size = 0;
+                if(inode_delete_all_blocks(inode) == -1)
+                {
+                    return -1;
+                }
             }
         }
         /* Determine initial offset */
@@ -113,7 +99,6 @@ int tfs_open(char const *name, int flags) {
 int tfs_close(int fhandle) { return remove_from_open_file_table(fhandle); }
 
 ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
-    /*printf("%s\n", (char*)buffer);*/
     open_file_entry_t *file = get_open_file_entry(fhandle);
     if (file == NULL) {
         return -1;
@@ -135,27 +120,29 @@ ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
         size_t written = 0;
         for(size_t block_idx = inode->i_size/BLOCK_SIZE; block_idx <= final_size/BLOCK_SIZE; block_idx++) 
         {
-        	//allocates necessary blocks
-        	inode->i_data_block[block_idx] = data_block_alloc();
-        	if(inode->i_data_block[block_idx] == -1) 
-        	{
-        		//TODO: Free previous blocks
-        		return -1;
-        	}
-
-        	void *block = data_block_get(inode->i_data_block[block_idx]);
-	        if (block == NULL) 
-	        {
-	            return -1;
-	        }
-
-			size_t block_offset = file->of_offset % BLOCK_SIZE;
+            size_t block_offset = file->of_offset % BLOCK_SIZE;
 	        
             //makes sure the block is only partially written into
             size_t to_write_in_block = BLOCK_SIZE - block_offset;
             if(to_write_in_block > to_write - written) 
             {
                 to_write_in_block = to_write - written;
+            }
+            //checks if to_write_in_block is empty and breaks the loop so it doesnt allocate an empty block
+            if(to_write_in_block == 0) 
+            {
+                break;
+            }
+            
+            int temp = get_block_from_idx(inode, block_idx, 1);
+            if(temp == -1)
+            {
+                return -1;
+            }
+            void* block = data_block_get(temp);
+            if(block == NULL) 
+            {
+                return -1;
             }
             
             /* Perform the actual write */
@@ -202,12 +189,6 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
         size_t read = 0;
         for(size_t block_idx = 0; block_idx <= final_size/BLOCK_SIZE; block_idx++) 
         {
-        	void *block = data_block_get(inode->i_data_block[block_idx]);
-	        if (block == NULL) 
-	        {
-	            return -1;
-	        }
-
             //finds the offset in the block rather than file
 			size_t block_offset = file->of_offset % BLOCK_SIZE;
 	        
@@ -216,6 +197,23 @@ ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
             if(to_read_in_block > to_read - read) 
             {
                 to_read_in_block = to_read - read;
+            }
+            
+            //checks if to_read_in_block is empty and breaks the loop
+            if(to_read_in_block == 0) 
+            {
+                break;
+            }
+
+            int temp = get_block_from_idx(inode, block_idx, 0);
+            if(temp == -1)
+            {
+                return -1;
+            }
+            void* block = data_block_get(temp);
+            if(block == NULL) 
+            {
+                return -1;
             }
 
             /* Perform the actual read */
@@ -262,15 +260,12 @@ int tfs_copy_to_external_fs(char const *source_path, char const *dest_path)
     tfs_read(tfs_d, contents, len);
     contents[len] = '\0';
 
-
     FILE *fd = fopen(dest_path, "wb");
     if(fd == NULL) 
     {
-        fclose(fd);
         free(contents);
         return -1;
     }
-    
     if(fwrite(contents, 1, len, fd) != len) 
     {
         fclose(fd);
@@ -278,7 +273,6 @@ int tfs_copy_to_external_fs(char const *source_path, char const *dest_path)
         return -1;
     }
 
-    
     fclose(fd);
     free(contents);
     return 0;

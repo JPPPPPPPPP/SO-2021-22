@@ -141,6 +141,107 @@ int inode_create(inode_type n_type) {
 }
 
 /*
+ *Auxilliary function to get a block given its index
+ */
+int get_block_from_idx(inode_t *inode, size_t block_idx, int create_new) 
+{
+    //when writing or reading from the first 10 blocks
+    if(block_idx < 10) 
+    {
+        //allocates necessary blocks
+        if(inode->i_data_block[block_idx] == -1) 
+        {
+            if(!create_new)
+            {
+                return -1;
+            }
+            inode->i_data_block[block_idx] = data_block_alloc();
+            if(inode->i_data_block[block_idx] == -1) 
+            {
+                return -1;
+            }
+        }
+        return inode->i_data_block[block_idx];
+    }
+    
+    //when writing or reading from the blocks following the 10th
+    if(inode->i_data_block[DATA_BLOCK_COUNT-1] == -1) 
+    {
+        //allocates necessary block
+        if(!create_new)
+        {
+            return -1;
+        }
+        inode->i_data_block[DATA_BLOCK_COUNT-1] = data_block_alloc();
+        if(inode->i_data_block[DATA_BLOCK_COUNT-1] == -1)
+        {
+            return -1;
+        }
+        //initializes every value in the block to NULL
+        memset(data_block_get(inode->i_data_block[DATA_BLOCK_COUNT-1]), -1, BLOCK_SIZE);
+
+    }
+    
+    block_idx = block_idx - (DATA_BLOCK_COUNT - 1);
+    int* block_idx_ptr = data_block_get(inode->i_data_block[DATA_BLOCK_COUNT-1]) + sizeof(void*) * block_idx;
+    if(*block_idx_ptr == -1) 
+    {
+        if(!create_new)
+        {
+            return -1;
+        }
+        *block_idx_ptr = data_block_alloc();
+        if(*block_idx_ptr == -1) 
+        {
+            return -1;
+        }
+    }
+    //idx ptr is -1 already in case of error so no need to check
+    return *block_idx_ptr;
+}
+
+
+/*
+ * Deletes all blocks in a node
+ * Input: 
+ *  - pointer to i-node
+ * Returns: 0 if successful, -1 if failed
+ */
+int inode_delete_all_blocks(inode_t *inode) 
+{
+    int return_code = 0;
+    //frees blocks
+    for(size_t i = 0; i < MAX_BLOCK_AMOUNT; i++) 
+    {
+        int block_idx = get_block_from_idx(inode, i, 0);
+        if(block_idx == -1)
+        {
+            break;
+        }
+        if(data_block_free(block_idx) == -1)
+        {
+            return_code = -1;
+        }
+    }
+    //removes pointers to block
+    for(int i = 0; i < DATA_BLOCK_COUNT-1; i++) 
+    {
+        inode->i_data_block[i] = -1;
+    }
+    //frees last block that contains pointers
+    if(data_block_free(inode->i_data_block[DATA_BLOCK_COUNT-1]) == -1)
+    {
+        return_code = -1;
+    }
+    //removes pointer from last block
+    inode->i_data_block[DATA_BLOCK_COUNT-1] = -1;
+    //sets size to 0
+    inode->i_size = 0;
+
+    return return_code;
+}
+
+/*
  * Deletes the i-node.
  * Input:
  *  - inumber: i-node's number
@@ -150,7 +251,6 @@ int inode_delete(int inumber) {
     // simulate storage access delay (to i-node and freeinode_ts)
     insert_delay();
     insert_delay();
-    int return_code = 0;
     if (!valid_inumber(inumber) || freeinode_ts[inumber] == FREE) {
         return -1;
     }
@@ -159,23 +259,14 @@ int inode_delete(int inumber) {
 
     if (inode_table[inumber].i_size > 0) 
     {
-        for(int i = 0; i < DATA_BLOCK_COUNT; i++) 
-        {
-            if(inode_table[inumber].i_data_block[i] != -1) 
-            {
-                if (data_block_free(inode_table[inumber].i_data_block[i]) == -1) 
-                {
-                    //frees all block regardless of errors
-                    return_code = -1;
-                }
-            }
-        }
+        //this function already returns 0 if success and -1 if fail
+        return inode_delete_all_blocks(&inode_table[inumber]);
     }
 
     /* TODO: handle non-empty directories (either return error, or recursively
      * delete children */
 
-    return return_code;
+    return 0;
 }
 
 /*

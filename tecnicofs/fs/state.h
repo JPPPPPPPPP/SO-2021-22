@@ -43,6 +43,8 @@ void state_init();
 void state_destroy();
 
 int inode_create(inode_type n_type);
+int get_block_from_idx(inode_t *inode, size_t block_idx, int create_new);
+int inode_delete_all_blocks(inode_t *inode);
 int inode_delete(int inumber);
 inode_t *inode_get(int inumber);
 

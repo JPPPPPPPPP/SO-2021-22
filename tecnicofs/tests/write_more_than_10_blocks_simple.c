@@ -1,4 +1,5 @@
 #include "../fs/operations.h"
+#include "../fs/state.h"
 #include <assert.h>
 #include <string.h>
 
@@ -12,7 +13,6 @@
    each write always targeting only 1 block of the file, 
    then checks if the file contents are as expected
  */
-
 
 int main() {
 
@@ -45,7 +45,6 @@ int main() {
     }
 
     assert(tfs_close(fd) != -1);
-
 
     printf("Sucessful test\n");
 
