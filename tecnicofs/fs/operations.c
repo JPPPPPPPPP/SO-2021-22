@@ -4,6 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* TODO locks for inodes & data blocks
+        make locks for open files
+*/
+
 int tfs_init() {
     state_init();
 

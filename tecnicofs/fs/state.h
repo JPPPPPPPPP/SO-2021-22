@@ -7,6 +7,30 @@
 #include <stdlib.h>
 #include <sys/types.h>
 
+//macro to use in case of error. prints error message and exits
+#define error(s) {fprintf(stderr, "%s\n", s); exit(1);}
+
+#define init_lock(lock) {if(pthread_rwlock_init(lock, NULL) != 0) \
+    { fprintf(stderr, "Lock could not be initialized at: %s\n", __func__); exit(1); }\
+}
+
+#define destroy_lock(lock) {if(pthread_rwlock_destroy(lock) != 0) \
+    { fprintf(stderr, "Lock could not be destroyed at: %s\n", __func__); exit(1); }\
+}
+
+#define wrlock(lock) { if(pthread_rwlock_wrlock(lock) != 0)\
+    { fprintf(stderr, "Lock could not be acquired at: %s\n", __func__); exit(1); }\
+}
+
+#define rdlock(lock) { if(pthread_rwlock_rdlock(lock) != 0)\
+    { fprintf(stderr, "Lock could not be acquired at: %s\n", __func__); exit(1); }\
+}
+
+#define unlock(lock) { if(pthread_rwlock_unlock(lock) != 0)\
+    { fprintf(stderr, "Lock could not be unlocked at: %s\n", __func__); exit(1); }\
+}
+
+
 /*
  * Directory entry
  */
@@ -24,7 +48,7 @@ typedef struct {
     inode_type i_node_type;
     size_t i_size;
     int i_data_block[DATA_BLOCK_COUNT];
-    /* in a real FS, more fields would exist here */
+    pthread_rwlock_t i_lock;  
 } inode_t;
 
 typedef enum { FREE = 0, TAKEN = 1 } allocation_state_t;

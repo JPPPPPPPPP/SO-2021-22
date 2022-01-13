@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <pthread.h>
 
 /* Persistent FS state  (in reality, it should be maintained in secondary
  * memory; for simplicity, this project maintains it in primary memory) */
@@ -12,10 +13,12 @@
 /* I-node table */
 static inode_t inode_table[INODE_TABLE_SIZE];
 static char freeinode_ts[INODE_TABLE_SIZE];
+static pthread_rwlock_t inode_table_lock;
 
 /* Data blocks */
 static char fs_data[BLOCK_SIZE * DATA_BLOCKS];
 static char free_blocks[DATA_BLOCKS];
+static pthread_rwlock_t data_blocks_lock;
 
 /* Volatile FS state */
 
@@ -65,6 +68,10 @@ static void insert_delay() {
  * Initializes FS state
  */
 void state_init() {
+    
+    init_lock(&data_blocks_lock);
+    init_lock(&inode_table_lock);
+
     for (size_t i = 0; i < INODE_TABLE_SIZE; i++) {
         freeinode_ts[i] = FREE;
     }
@@ -78,7 +85,9 @@ void state_init() {
     }
 }
 
-void state_destroy() { /* nothing to do */
+void state_destroy() { 
+    destroy_lock(&data_blocks_lock);
+    destroy_lock(&inode_table_lock);
 }
 
 /*
@@ -89,6 +98,7 @@ void state_destroy() { /* nothing to do */
  *  new i-node's number if successfully created, -1 otherwise
  */
 int inode_create(inode_type n_type) {
+    wrlock(&inode_table_lock);
     for (int inumber = 0; inumber < INODE_TABLE_SIZE; inumber++) {
         if ((inumber * (int) sizeof(allocation_state_t)) == 0) {
             insert_delay(); // simulate storage access delay (to freeinode_ts)
@@ -107,6 +117,7 @@ int inode_create(inode_type n_type) {
                 int b = data_block_alloc();
                 if (b == -1) {
                     freeinode_ts[inumber] = FREE;
+                    unlock(&inode_table_lock);
                     return -1;
                 }
 
@@ -120,6 +131,7 @@ int inode_create(inode_type n_type) {
                 dir_entry_t *dir_entry = (dir_entry_t *)data_block_get(b);
                 if (dir_entry == NULL) {
                     freeinode_ts[inumber] = FREE;
+                    unlock(&inode_table_lock);  
                     return -1;
                 }
 
@@ -134,17 +146,21 @@ int inode_create(inode_type n_type) {
                     inode_table[inumber].i_data_block[i] = -1;
                 }
             }
+            init_lock(&(inode_table[inumber].i_lock));
+            unlock(&inode_table_lock);
             return inumber;
         }
     }
+    unlock(&inode_table_lock);
     return -1;
 }
 
 /*
- *Auxilliary function to get a block given its index
+ * Auxilliary function to get a block given its index
+ * Assumes inode was locked previously by caller
  */
 int get_block_from_idx(inode_t *inode, size_t block_idx, int create_new) 
-{
+{   
     //when writing or reading from the first 10 blocks
     if(block_idx < 10) 
     {
@@ -203,12 +219,14 @@ int get_block_from_idx(inode_t *inode, size_t block_idx, int create_new)
 
 /*
  * Deletes all blocks in a node
+ * Assumes inode was locked previously by caller
  * Input: 
  *  - pointer to i-node
  * Returns: 0 if successful, -1 if failed
  */
 int inode_delete_all_blocks(inode_t *inode) 
 {
+    wrlock(&(inode->i_lock));
     int return_code = 0;
     //frees blocks
     for(size_t i = 0; i < MAX_BLOCK_AMOUNT; i++) 
@@ -237,12 +255,13 @@ int inode_delete_all_blocks(inode_t *inode)
     inode->i_data_block[DATA_BLOCK_COUNT-1] = -1;
     //sets size to 0
     inode->i_size = 0;
-
+    unlock(&(inode->i_lock));
     return return_code;
 }
 
 /*
  * Deletes the i-node.
+ * Assumes an inode being deleted does not have any other active pointers thus not requiring locking the file
  * Input:
  *  - inumber: i-node's number
  * Returns: 0 if successful, -1 if failed
@@ -251,7 +270,11 @@ int inode_delete(int inumber) {
     // simulate storage access delay (to i-node and freeinode_ts)
     insert_delay();
     insert_delay();
+
+    wrlock(&inode_table_lock);
+
     if (!valid_inumber(inumber) || freeinode_ts[inumber] == FREE) {
+        unlock(&inode_table_lock);
         return -1;
     }
 
@@ -259,13 +282,17 @@ int inode_delete(int inumber) {
 
     if (inode_table[inumber].i_size > 0) 
     {
-        //this function already returns 0 if success and -1 if fail
-        return inode_delete_all_blocks(&inode_table[inumber]);
+        int ret = inode_delete_all_blocks(&inode_table[inumber]);
+        destroy_lock(&(inode_table[inumber].i_lock));
+        unlock(&inode_table_lock);
+        //this variable already contains 0 if success and -1 if fail for inode_delete_all_blocks
+        return ret;
     }
 
     /* TODO: handle non-empty directories (either return error, or recursively
      * delete children */
 
+    unlock(&inode_table_lock);
     return 0;
 }
 
@@ -276,12 +303,14 @@ int inode_delete(int inumber) {
  * Returns: pointer if successful, NULL if failed
  */
 inode_t *inode_get(int inumber) {
+    rdlock(&inode_table_lock);
     if (!valid_inumber(inumber)) {
         return NULL;
     }
-
+    inode_t * ret = &inode_table[inumber];
     insert_delay(); // simulate storage access delay to i-node
-    return &inode_table[inumber];
+    unlock(&inode_table_lock);
+    return ret;
 }
 
 /*
@@ -293,23 +322,31 @@ inode_t *inode_get(int inumber) {
  * Returns: SUCCESS or FAIL
  */
 int add_dir_entry(int inumber, int sub_inumber, char const *sub_name) {
+    rdlock(&inode_table_lock);
     if (!valid_inumber(inumber) || !valid_inumber(sub_inumber)) {
+        unlock(&inode_table_lock);
         return -1;
     }
 
     insert_delay(); // simulate storage access delay to i-node with inumber
     if (inode_table[inumber].i_node_type != T_DIRECTORY) {
+        unlock(&inode_table_lock);
         return -1;
     }
 
     if (strlen(sub_name) == 0) {
+        unlock(&inode_table_lock);
         return -1;
     }
+    
+    wrlock(&data_blocks_lock);
 
     /* Locates the block containing the directory's entries */
     dir_entry_t *dir_entry =
         (dir_entry_t *)data_block_get(inode_table[inumber].i_data_block[0]);
     if (dir_entry == NULL) {
+        unlock(&inode_table_lock);
+        unlock(&data_blocks_lock);
         return -1;
     }
 
@@ -319,10 +356,13 @@ int add_dir_entry(int inumber, int sub_inumber, char const *sub_name) {
             dir_entry[i].d_inumber = sub_inumber;
             strncpy(dir_entry[i].d_name, sub_name, MAX_FILE_NAME - 1);
             dir_entry[i].d_name[MAX_FILE_NAME - 1] = 0;
+            unlock(&inode_table_lock);
+            unlock(&data_blocks_lock);
             return 0;
         }
     }
-
+    unlock(&inode_table_lock);
+    unlock(&data_blocks_lock);
     return -1;
 }
 
@@ -333,16 +373,21 @@ int add_dir_entry(int inumber, int sub_inumber, char const *sub_name) {
  * 	Returns i-number linked to the target name, -1 if not found
  */
 int find_in_dir(int inumber, char const *sub_name) {
+    rdlock(&inode_table_lock);
     insert_delay(); // simulate storage access delay to i-node with inumber
     if (!valid_inumber(inumber) ||
         inode_table[inumber].i_node_type != T_DIRECTORY) {
+        unlock(&inode_table_lock);
         return -1;
     }
 
+    rdlock(&data_blocks_lock);
     /* Locates the block containing the directory's entries */
     dir_entry_t *dir_entry =
         (dir_entry_t *)data_block_get(inode_table[inumber].i_data_block[0]);
     if (dir_entry == NULL) {
+        unlock(&inode_table_lock);
+        unlock(&data_blocks_lock);
         return -1;
     }
 
@@ -351,9 +396,13 @@ int find_in_dir(int inumber, char const *sub_name) {
     for (int i = 0; i < MAX_DIR_ENTRIES; i++)
         if ((dir_entry[i].d_inumber != -1) &&
             (strncmp(dir_entry[i].d_name, sub_name, MAX_FILE_NAME) == 0)) {
-            return dir_entry[i].d_inumber;
+            int ret = dir_entry[i].d_inumber;
+            unlock(&inode_table_lock);
+            unlock(&data_blocks_lock);
+            return ret;
         }
-
+    unlock(&inode_table_lock);
+    unlock(&data_blocks_lock);
     return -1;
 }
 
@@ -362,6 +411,8 @@ int find_in_dir(int inumber, char const *sub_name) {
  * Returns: block index if successful, -1 otherwise
  */
 int data_block_alloc() {
+    wrlock(&data_blocks_lock);
+    
     for (int i = 0; i < DATA_BLOCKS; i++) {
         if (i * (int) sizeof(allocation_state_t) % BLOCK_SIZE == 0) {
             insert_delay(); // simulate storage access delay to free_blocks
@@ -369,9 +420,11 @@ int data_block_alloc() {
 
         if (free_blocks[i] == FREE) {
             free_blocks[i] = TAKEN;
+            unlock(&data_blocks_lock);
             return i;
         }
     }
+    unlock(&data_blocks_lock);
     return -1;
 }
 
@@ -381,12 +434,15 @@ int data_block_alloc() {
  * Returns: 0 if success, -1 otherwise
  */
 int data_block_free(int block_number) {
+    wrlock(&data_blocks_lock);
     if (!valid_block_number(block_number)) {
+        unlock(&data_blocks_lock);
         return -1;
     }
 
     insert_delay(); // simulate storage access delay to free_blocks
     free_blocks[block_number] = FREE;
+    unlock(&data_blocks_lock);
     return 0;
 }
 
