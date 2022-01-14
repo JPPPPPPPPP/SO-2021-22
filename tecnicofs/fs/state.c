@@ -18,7 +18,7 @@ static pthread_rwlock_t inode_table_lock;
 /* Data blocks */
 static char fs_data[BLOCK_SIZE * DATA_BLOCKS];
 static char free_blocks[DATA_BLOCKS];
-static pthread_rwlock_t data_blocks_lock;
+static pthread_rwlock_t data_blocks_table_lock;
 
 /* Volatile FS state */
 
@@ -70,7 +70,7 @@ static void insert_delay() {
  */
 void state_init() {
     
-    init_lock(&data_blocks_lock);
+    init_lock(&data_blocks_table_lock);
     init_lock(&inode_table_lock);
 
     for (size_t i = 0; i < INODE_TABLE_SIZE; i++) {
@@ -87,7 +87,7 @@ void state_init() {
 }
 
 void state_destroy() { 
-    destroy_lock(&data_blocks_lock);
+    destroy_lock(&data_blocks_table_lock);
     destroy_lock(&inode_table_lock);
 }
 
@@ -115,9 +115,9 @@ int inode_create(inode_type n_type) {
             if (n_type == T_DIRECTORY) {
                 /* Initializes directory (filling its block with empty
                  * entries, labeled with inumber==-1) */
-                wrlock(&data_blocks_lock);
+                wrlock(&data_blocks_table_lock);
                 int b = data_block_alloc();
-                unlock(&data_blocks_lock);
+                unlock(&data_blocks_table_lock);
                 if (b == -1) {
                     freeinode_ts[inumber] = FREE;
                     unlock(&inode_table_lock);
@@ -164,9 +164,9 @@ int inode_create(inode_type n_type) {
  */
 void* locking_memcpy(void *restrict dest, const void *restrict source, size_t n) 
 {
-    wrlock(&data_blocks_lock);
+    wrlock(&data_blocks_table_lock);
     void* ret = memcpy(dest, source, n);
-    unlock(&data_blocks_lock);
+    unlock(&data_blocks_table_lock);
     return ret;
 }
 
@@ -187,9 +187,9 @@ int get_block_from_idx(inode_t *inode, size_t block_idx, int create_new)
             {
                 return -1;
             }
-            wrlock(&data_blocks_lock);
+            wrlock(&data_blocks_table_lock);
             inode->i_data_block[block_idx] = data_block_alloc();
-            unlock(&data_blocks_lock);
+            unlock(&data_blocks_table_lock);
             if(inode->i_data_block[block_idx] == -1) 
             {
                 return -1;
@@ -206,17 +206,17 @@ int get_block_from_idx(inode_t *inode, size_t block_idx, int create_new)
         {
             return -1;
         }
-        wrlock(&data_blocks_lock);
+        wrlock(&data_blocks_table_lock);
         inode->i_data_block[DATA_BLOCK_COUNT-1] = data_block_alloc();
-        unlock(&data_blocks_lock);
+        unlock(&data_blocks_table_lock);
         if(inode->i_data_block[DATA_BLOCK_COUNT-1] == -1)
         {
             return -1;
         }
         //initializes every value in the block to NULL
-        wrlock(&data_blocks_lock);
+        wrlock(&data_blocks_table_lock);
         memset(data_block_get(inode->i_data_block[DATA_BLOCK_COUNT-1]), -1, BLOCK_SIZE);
-        unlock(&data_blocks_lock);
+        unlock(&data_blocks_table_lock);
 
     }
     
@@ -228,9 +228,9 @@ int get_block_from_idx(inode_t *inode, size_t block_idx, int create_new)
         {
             return -1;
         }
-        wrlock(&data_blocks_lock);
+        wrlock(&data_blocks_table_lock);
         *block_idx_ptr = data_block_alloc();
-        unlock(&data_blocks_lock);
+        unlock(&data_blocks_table_lock);
         if(*block_idx_ptr == -1) 
         {
             return -1;
@@ -260,12 +260,12 @@ int inode_delete_all_blocks(inode_t *inode)
         {
             break;
         }
-        wrlock(&data_blocks_lock);
+        wrlock(&data_blocks_table_lock);
         if(data_block_free(block_idx) == -1)
         {
             return_code = -1;
         }
-        unlock(&data_blocks_lock);
+        unlock(&data_blocks_table_lock);
     }
     //removes pointers to block
     for(int i = 0; i < DATA_BLOCK_COUNT-1; i++) 
@@ -273,12 +273,12 @@ int inode_delete_all_blocks(inode_t *inode)
         inode->i_data_block[i] = -1;
     }
     //frees last block that contains pointers
-    wrlock(&data_blocks_lock);
+    wrlock(&data_blocks_table_lock);
     if(data_block_free(inode->i_data_block[DATA_BLOCK_COUNT-1]) == -1)
     {
         return_code = -1;
     }
-    unlock(&data_blocks_lock);
+    unlock(&data_blocks_table_lock);
 
     //removes pointer from last block
     inode->i_data_block[DATA_BLOCK_COUNT-1] = -1;
@@ -368,14 +368,14 @@ int add_dir_entry(int inumber, int sub_inumber, char const *sub_name) {
         return -1;
     }
     
-    wrlock(&data_blocks_lock);
+    wrlock(&data_blocks_table_lock);
 
     /* Locates the block containing the directory's entries */
     dir_entry_t *dir_entry =
         (dir_entry_t *)data_block_get(inode_table[inumber].i_data_block[0]);
     if (dir_entry == NULL) {
         unlock(&inode_table_lock);
-        unlock(&data_blocks_lock);
+        unlock(&data_blocks_table_lock);
         return -1;
     }
 
@@ -386,12 +386,12 @@ int add_dir_entry(int inumber, int sub_inumber, char const *sub_name) {
             strncpy(dir_entry[i].d_name, sub_name, MAX_FILE_NAME - 1);
             dir_entry[i].d_name[MAX_FILE_NAME - 1] = 0;
             unlock(&inode_table_lock);
-            unlock(&data_blocks_lock);
+            unlock(&data_blocks_table_lock);
             return 0;
         }
     }
     unlock(&inode_table_lock);
-    unlock(&data_blocks_lock);
+    unlock(&data_blocks_table_lock);
     return -1;
 }
 
@@ -410,13 +410,13 @@ int find_in_dir(int inumber, char const *sub_name) {
         return -1;
     }
 
-    rdlock(&data_blocks_lock);
+    rdlock(&data_blocks_table_lock);
     /* Locates the block containing the directory's entries */
     dir_entry_t *dir_entry =
         (dir_entry_t *)data_block_get(inode_table[inumber].i_data_block[0]);
     if (dir_entry == NULL) {
         unlock(&inode_table_lock);
-        unlock(&data_blocks_lock);
+        unlock(&data_blocks_table_lock);
         return -1;
     }
 
@@ -427,11 +427,11 @@ int find_in_dir(int inumber, char const *sub_name) {
             (strncmp(dir_entry[i].d_name, sub_name, MAX_FILE_NAME) == 0)) {
             int ret = dir_entry[i].d_inumber;
             unlock(&inode_table_lock);
-            unlock(&data_blocks_lock);
+            unlock(&data_blocks_table_lock);
             return ret;
         }
     unlock(&inode_table_lock);
-    unlock(&data_blocks_lock);
+    unlock(&data_blocks_table_lock);
     return -1;
 }
 

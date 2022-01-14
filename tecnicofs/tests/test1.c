@@ -2,6 +2,8 @@
 #include <assert.h>
 #include <string.h>
 
+//thsi test writes something to /f1 and copies it to an external file system with tfs_copy_to_external_fs
+
 int main() {
     //setvbuf(stdout, NULL, _IONBF, 0);
 
@@ -31,7 +33,7 @@ int main() {
     buffer[r] = '\0';
     assert(strcmp(buffer, str) == 0);
 
-    assert(tfs_copy_to_external_fs(path, "./nut") != -1);
+    assert(tfs_copy_to_external_fs(path, "./newDir") != -1);
 
     assert(tfs_close(f) != -1);
 
