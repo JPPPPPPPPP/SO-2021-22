@@ -8,7 +8,7 @@
 #define COUNT 200
 #define SIZE 4
 
-//creates file and writes more than 10 blocks to it
+//creates file and writes Js to it
 void* thread_func_1(void* unused) 
 {
     (void)(unused);
@@ -34,7 +34,7 @@ void* thread_func_1(void* unused)
     return 0;
 }
 
-//creates file and writes more than 10 blocks to it
+//creates file and writes Ps to to it
 void* thread_func_2(void* unused) 
 {
     (void)(unused);

@@ -30,7 +30,6 @@
     { fprintf(stderr, "Lock could not be unlocked at: %s\n", __func__); exit(1); }\
 }
 
-
 /*
  * Directory entry
  */
@@ -59,6 +58,7 @@ typedef enum { FREE = 0, TAKEN = 1 } allocation_state_t;
 typedef struct {
     int of_inumber;
     size_t of_offset;
+    pthread_rwlock_t of_lock;
 } open_file_entry_t;
 
 #define MAX_DIR_ENTRIES (BLOCK_SIZE / sizeof(dir_entry_t))
@@ -67,6 +67,7 @@ void state_init();
 void state_destroy();
 
 int inode_create(inode_type n_type);
+void* locking_memcpy(void *restrict dest, const void *restrict source, size_t n);
 int get_block_from_idx(inode_t *inode, size_t block_idx, int create_new);
 int inode_delete_all_blocks(inode_t *inode);
 int inode_delete(int inumber);
