@@ -337,3 +337,20 @@ open_file_entry_t *get_open_file_entry(int fhandle) {
     }
     return &open_file_table[fhandle];
 }
+
+/* Returns 0 or 1 depending on whether files are open or not
+ * Inputs:
+ * 	 - none
+ * Returns: 0 if file(s) is(are) open, 1 otherwise
+ */
+int files_are_open() {
+    for(size_t i = 0; i < MAX_OPEN_FILES; i++)
+    {
+        if(free_open_file_entries[i] == TAKEN)
+        {
+            return 1;
+        }
+    }
+    //empty
+    return 0;
+}

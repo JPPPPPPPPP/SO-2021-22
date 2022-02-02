@@ -4,15 +4,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static pthread_mutex_t single_global_lock;
+static pthread_cond_t files_open;
+int destroy_after_all_closed_called;
 
 int tfs_init() {
     state_init();
-
+    destroy_after_all_closed_called = 0;
     if (pthread_mutex_init(&single_global_lock, 0) != 0)
         return -1;
 
+    if(pthread_cond_init(&files_open, NULL) != 0) 
+    {
+        return -1;
+    }
     /* create root inode */
     int root = inode_create(T_DIRECTORY);
     if (root != ROOT_DIR_INUM) {
@@ -24,6 +31,10 @@ int tfs_init() {
 
 int tfs_destroy() {
     state_destroy();
+    if(pthread_cond_destroy(&files_open) != 0) 
+    {
+        return -1;
+    }
     if (pthread_mutex_destroy(&single_global_lock) != 0) {
         return -1;
     }
@@ -35,7 +46,21 @@ static bool valid_pathname(char const *name) {
 }
 
 int tfs_destroy_after_all_closed() {
-    /* TO DO: implement this */
+    //sets flag so that other functions dont run after this one is called
+    destroy_after_all_closed_called = 1;
+
+    if (pthread_mutex_lock(&single_global_lock) != 0)
+        return -1;
+    
+    //runs while files are open
+    while (files_are_open() == 1)
+    {
+        pthread_cond_wait(&files_open, &single_global_lock);
+    }
+
+    if (pthread_mutex_unlock(&single_global_lock) != 0)
+        return -1;
+    tfs_destroy();
     return 0;
 }
 
@@ -51,9 +76,12 @@ int _tfs_lookup_unsynchronized(char const *name) {
 }
 
 int tfs_lookup(char const *name) {
+    
     if (pthread_mutex_lock(&single_global_lock) != 0)
         return -1;
+
     int ret = _tfs_lookup_unsynchronized(name);
+
     if (pthread_mutex_unlock(&single_global_lock) != 0)
         return -1;
     return ret;
@@ -113,22 +141,38 @@ static int _tfs_open_unsynchronized(char const *name, int flags) {
 }
 
 int tfs_open(char const *name, int flags) {
+    /* Quaisquer chamadas a tfs_open que ocorram concorrentemente ou posteriormente ao
+     * momento em que a tfs_destroy_after_all_closed desativa o TecnicoFS devem devolver erro
+     * (-1). Só depois do TecnicoFS ser ativado de novo (por chamada a tfs_init) é que as
+     * chamadas a tfs_open devem voltar a ser permitidas.
+     */
+    if(destroy_after_all_closed_called == 1) 
+    {
+        return -1;
+    }
+    
     if (pthread_mutex_lock(&single_global_lock) != 0)
         return -1;
+
     int ret = _tfs_open_unsynchronized(name, flags);
+
     if (pthread_mutex_unlock(&single_global_lock) != 0)
         return -1;
-
+    
+    signal_files_open();
     return ret;
 }
 
 int tfs_close(int fhandle) {
     if (pthread_mutex_lock(&single_global_lock) != 0)
         return -1;
+    
     int r = remove_from_open_file_table(fhandle);
+    
     if (pthread_mutex_unlock(&single_global_lock) != 0)
         return -1;
 
+    signal_files_open();
     return r;
 }
 
@@ -178,7 +222,9 @@ static ssize_t _tfs_write_unsynchronized(int fhandle, void const *buffer,
 ssize_t tfs_write(int fhandle, void const *buffer, size_t to_write) {
     if (pthread_mutex_lock(&single_global_lock) != 0)
         return -1;
+
     ssize_t ret = _tfs_write_unsynchronized(fhandle, buffer, to_write);
+    
     if (pthread_mutex_unlock(&single_global_lock) != 0)
         return -1;
 
@@ -222,7 +268,9 @@ static ssize_t _tfs_read_unsynchronized(int fhandle, void *buffer, size_t len) {
 ssize_t tfs_read(int fhandle, void *buffer, size_t len) {
     if (pthread_mutex_lock(&single_global_lock) != 0)
         return -1;
+    
     ssize_t ret = _tfs_read_unsynchronized(fhandle, buffer, len);
+
     if (pthread_mutex_unlock(&single_global_lock) != 0)
         return -1;
 
